@@ -1,0 +1,11 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Runtime data (DB, WAL files, RSA keys)
+data/
+
+# Environment secrets
+.env
