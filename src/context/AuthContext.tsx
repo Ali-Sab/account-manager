@@ -9,6 +9,7 @@ interface AuthContextValue {
   login: (accessToken: string, csrfToken?: string) => void;
   logout: () => Promise<void>;
   setScreen: (s: Screen) => void;
+  reboot: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -53,7 +54,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ currentScreen, loginHasPasskeys, login, logout, setScreen: setCurrentScreen }}>
+    <AuthContext.Provider value={{ currentScreen, loginHasPasskeys, login, logout, setScreen: setCurrentScreen, reboot: boot }}>
       {children}
     </AuthContext.Provider>
   );

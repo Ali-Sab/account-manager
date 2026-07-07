@@ -1,8 +1,12 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import { useAuth } from "../context/AuthContext";
 
 type Step = "secret" | "confirm" | "done";
+
+interface Props {
+  token: string;
+  onDone: () => void;
+}
 
 function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
   const [copied, setCopied] = useState(false);
@@ -19,8 +23,7 @@ function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) 
   );
 }
 
-export function SetupScreen() {
-  const { reboot } = useAuth();
+export function InviteScreen({ token, onDone }: Props) {
   const [step, setStep]           = useState<Step>("secret");
   const [secret, setSecret]       = useState("");
   const [formatted, setFormatted] = useState("");
@@ -36,23 +39,28 @@ export function SetupScreen() {
   const [loading, setLoading]     = useState(false);
 
   useEffect(() => {
-    api("GET", "/api/setup/secret", undefined, false).then(data => {
-      if (data.secret) {
-        setSecret(data.secret as string);
-        setFormatted(data.formatted as string);
-        setQrUrl(data.qrDataUrl as string);
-      }
+    api("GET", `/api/invite/secret?token=${encodeURIComponent(token)}`, undefined, false).then(data => {
+      if (data.error) { setError(data.error as string); return; }
+      setSecret(data.secret as string);
+      setFormatted(data.formatted as string);
+      setQrUrl(data.qrDataUrl as string);
     });
-  }, []);
+  }, [token]);
 
-  async function submitSetup(code = totpCode) {
+  async function submitAccept(code = totpCode) {
     setError("");
     if (!username.trim()) return setError("Username required");
     if (password.length < 12) return setError("Password must be at least 12 characters");
     if (password !== password2) return setError("Passwords do not match");
     if (!code) return setError("Enter the 6-digit code from your authenticator app");
     setLoading(true);
-    const data = await api("POST", "/api/setup", { username: username.trim(), email: email.trim(), password, totpCode: code }, false);
+    const data = await api("POST", "/api/invite/accept", {
+      token,
+      username: username.trim(),
+      email: email.trim(),
+      password,
+      totpCode: code,
+    }, false);
     setLoading(false);
     if (data.error) return setError(data.error as string);
     setRecoveryCodes(data.recoveryCodes as string[]);
@@ -63,10 +71,23 @@ export function SetupScreen() {
   function handleTotpChange(val: string) {
     const digits = val.replace(/\D/g, "").slice(0, 6);
     setTotpCode(digits);
-    if (digits.length === 6) setTimeout(() => submitSetup(digits), 0);
+    if (digits.length === 6) submitAccept(digits);
   }
 
-  const stepIdx = step === "secret" ? 0 : step === "confirm" ? 1 : 2;
+  if (error && step === "secret" && !qrUrl) {
+    return (
+      <div className="screen">
+        <div className="screen-box">
+          <div className="screen-tag">ACCOUNT MANAGER</div>
+          <div className="screen-title">Invalid Invite</div>
+          <div className="error-msg">{error}</div>
+          <p style={{ fontSize: 13, color: "var(--muted)", marginTop: 12 }}>
+            This invite link may have expired or already been used. Ask an admin to send a new one.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   if (step === "done") {
     const allCodes = recoveryCodes.join("\n");
@@ -76,7 +97,7 @@ export function SetupScreen() {
           <div className="screen-tag">ACCOUNT MANAGER</div>
           <div className="screen-title">Save your recovery codes</div>
           <p style={{ fontSize: 13, color: "var(--muted)", marginBottom: 16 }}>
-            Store these somewhere safe. Each code works once — if you lose your authenticator, they&apos;re your only way back in.
+            Store these somewhere safe. Each code works once — they&apos;re your only way back in if you lose your authenticator.
           </p>
           <div className="card" style={{ marginBottom: 8 }}>
             <div className="code-list">
@@ -93,7 +114,7 @@ export function SetupScreen() {
               Check your inbox — a verification link has been sent to confirm your email address.
             </p>
           )}
-          <button className="btn btn-gold" style={{ marginTop: 16 }} onClick={reboot}>
+          <button className="btn btn-gold" style={{ marginTop: 16 }} onClick={onDone}>
             Continue to Sign In
           </button>
         </div>
@@ -105,11 +126,11 @@ export function SetupScreen() {
     <div className="screen">
       <div className="screen-box">
         <div className="screen-tag">ACCOUNT MANAGER</div>
-        <div className="screen-title">Set up your account</div>
+        <div className="screen-title">Create your account</div>
 
         <div className="steps" aria-hidden="true">
           {[0, 1].map(i => (
-            <div key={i} className={`step-dot${i <= stepIdx ? " active" : ""}`} />
+            <div key={i} className={`step-dot${(step === "secret" ? 0 : 1) >= i ? " active" : ""}`} />
           ))}
         </div>
 
@@ -141,33 +162,33 @@ export function SetupScreen() {
           <div>
             {error && <div className="error-msg" role="alert">{error}</div>}
             <div className="field">
-              <label htmlFor="setup-username">Username</label>
-              <input id="setup-username" value={username} onChange={e => setUsername(e.target.value)} autoFocus autoComplete="username" />
+              <label htmlFor="invite-username">Username</label>
+              <input id="invite-username" value={username} onChange={e => setUsername(e.target.value)} autoFocus autoComplete="username" />
             </div>
             <div className="field">
-              <label htmlFor="setup-email">
+              <label htmlFor="invite-email">
                 Email <span style={{ color: "var(--muted)", fontWeight: 400 }}>(optional — for password reset)</span>
               </label>
-              <input id="setup-email" type="email" value={email} onChange={e => setEmail(e.target.value)} autoComplete="email" />
+              <input id="invite-email" type="email" value={email} onChange={e => setEmail(e.target.value)} autoComplete="email" />
             </div>
             <div className="field">
-              <label htmlFor="setup-password">Password</label>
-              <input id="setup-password" type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="new-password" />
+              <label htmlFor="invite-password">Password</label>
+              <input id="invite-password" type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="new-password" />
               <div className="field-hint">At least 12 characters.</div>
             </div>
             <div className="field">
-              <label htmlFor="setup-password2">Confirm Password</label>
-              <input id="setup-password2" type="password" value={password2} onChange={e => setPassword2(e.target.value)} autoComplete="new-password" />
+              <label htmlFor="invite-password2">Confirm Password</label>
+              <input id="invite-password2" type="password" value={password2} onChange={e => setPassword2(e.target.value)} autoComplete="new-password" />
             </div>
             <div className="field">
-              <label htmlFor="setup-totp">Authenticator Code</label>
-              <input id="setup-totp" value={totpCode} onChange={e => handleTotpChange(e.target.value)}
+              <label htmlFor="invite-totp">Authenticator Code</label>
+              <input id="invite-totp" value={totpCode} onChange={e => handleTotpChange(e.target.value)}
                 placeholder="6 digits" maxLength={6} inputMode="numeric" autoComplete="one-time-code" />
-              <div className="field-hint">Enter the code shown in your authenticator app to confirm setup.</div>
+              <div className="field-hint">Enter the code shown in your authenticator app.</div>
             </div>
             <div className="btn-row">
-              <button className="btn btn-gold" onClick={() => submitSetup()} disabled={loading}>
-                {loading ? "Setting up…" : "Complete Setup"}
+              <button className="btn btn-gold" onClick={submitAccept} disabled={loading}>
+                {loading ? "Creating account…" : "Create Account"}
               </button>
               <button className="btn btn-ghost btn-sm" onClick={() => setStep("secret")}>Back</button>
             </div>

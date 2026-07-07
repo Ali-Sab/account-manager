@@ -1,27 +1,17 @@
 {
   "name": "account-manager",
   "version": "1.0.0",
-  "description": "Standalone account management service with RS256 JWT issuance",
-  "main": "server/index.js",
+  "description": "Standalone auth service — Go backend, React CSR frontend",
   "scripts": {
-    "setup": "node scripts/setup.js",
-    "start": "node server/index.js",
-    "dev:server": "node --watch server/index.js",
+    "build": "vite build",
     "dev:client": "vite",
+    "dev:server": "go run ./cmd/server",
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
-    "build": "vite build"
+    "test:go": "go test ./...",
+    "test:e2e": "playwright test --config e2e/playwright.config.ts",
+    "test": "npm run test:go"
   },
   "dependencies": {
-    "@simplewebauthn/server": "^13.3.0",
-    "better-sqlite3": "^12.9.0",
-    "cookie-parser": "^1.4.7",
-    "csrf-csrf": "^4.0.3",
-    "dotenv": "^17.4.2",
-    "express": "^4.19.2",
-    "express-rate-limit": "^7.4.1",
-    "jsonwebtoken": "^9.0.2",
-    "otplib": "^13.4.0",
-    "qrcode": "^1.5.4",
     "react": "^19.2.5",
     "react-dom": "^19.2.5"
   },
@@ -29,10 +19,12 @@
     "node": ">=18.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
     "concurrently": "^9.2.1",
+    "otpauth": "^9.5.1",
     "typescript": "^6.0.3",
     "vite": "^8.0.10"
   }

@@ -1,44 +1,57 @@
 # account-manager
 
-Standalone auth service and account portal. It is both a Node.js backend (Express + SQLite) and a React CSR frontend (Vite). Other services are relying parties — they redirect here for login and verify the RS256 JWTs it issues.
+Standalone auth service and account portal. Go backend (chi + modernc SQLite) + React CSR frontend (Vite). Other services are relying parties — they redirect here for login and verify the RS256 JWTs it issues.
 
 ## Repo layout
 
 ```
-scripts/setup.js      — idempotent startup: RSA keys, DB migrations, OAuth client seeding
-server/
-  index.js            — process entry point (listen)
-  app.js              — Express wiring, route mounts, SPA fallback
-  db.js               — SQLite via better-sqlite3; auth tables only (no game data)
-  lib/
-    keys.js           — loads RSA keypair from DATA_DIR/keys/; exports privateKey, publicKey, jwks
-    crypto.js         — signToken, verifyAccess, signMfaToken, verifyMfaToken, hashPassword, TOTP
+cmd/server/main.go        — entry point: idempotent setup, start HTTP server
+internal/
+  config/config.go        — env vars + defaults
+  db/
+    db.go                 — open SQLite (modernc, no CGO), run migrations
+    queries.go            — all CRUD: users, refresh tokens, passkeys, OAuth tables
+  keys/keys.go            — load/generate RSA keypair; JWKS builder
+  auth/
+    jwt.go                — SignToken, VerifyAccess, SignMFAToken, VerifyMFAToken (RS256)
+    password.go           — PBKDF2-SHA512, 310000 iters, 64-byte key, hex output
+    totp.go               — GenerateSecret, VerifyTOTP (±1 period)
+    recovery.go           — GenerateRecoveryCodes (8 codes, xxxx-xxxx-xx format)
   middleware/
-    requireAuth.js    — RS256 JWT check (audience: account-manager)
-    csrf.js           — double-submit CSRF via csrf-csrf
-  routes/
-    auth.js           — login, MFA, refresh, logout, password change, recovery codes
-    setup.js          — first-run account creation (username, password, TOTP)
-    webauthn.js       — passkey registration and authentication
-    oauth.js          — OAuth 2.0 server: /authorize, /token, discovery endpoints
-    jwks.js           — GET /.well-known/jwks.json
-src/                  — React CSR app
+    auth.go               — RequireAuth: Bearer JWT check, audience=account-manager
+    csrf.go               — double-submit CSRF cookie
+    ratelimit.go          — in-memory sliding-window rate limiter
+  handler/
+    auth.go               — /api/auth/* routes
+    setup.go              — /api/setup/* routes + QR code
+    webauthn.go           — /api/webauthn/* routes (go-webauthn/webauthn)
+    oauth.go              — /authorize, /token, /.well-known/oauth-* (PKCE)
+    jwks.go               — GET /.well-known/jwks.json
+  setup/setup.go          — idempotent init: RSA key gen, DB migrations, OAuth client seeding
+src/                      — React CSR app
   screens/
-    SetupScreen.tsx   — first-run wizard
-    LoginScreen.tsx   — password + TOTP login
-    AccountScreen.tsx — passkey management, change password, recovery codes
-  context/AuthContext.tsx  — boots via POST /api/auth/refresh
+    SetupScreen.tsx         — first-run wizard
+    LoginScreen.tsx         — password + TOTP login, forgot password
+    AccountScreen.tsx       — passkey management, email, change password, recovery codes
+    InviteScreen.tsx        — new user account creation via invite link
+    ResetPasswordScreen.tsx — password reset via emailed link
+  context/AuthContext.tsx — boots via POST /api/auth/refresh
+e2e/                      — Playwright e2e tests
 ```
 
 ## Startup
 
 ```bash
-npm run setup   # generates RSA keys, runs DB migrations, seeds OAuth clients — safe to re-run
-npm start       # production
-npm run dev     # dev: Express (--watch) + Vite in parallel
+# Dev: Go server + Vite in parallel
+npm run dev
+
+# Production build (React only — Go binary built separately)
+npm run build
+CGO_ENABLED=0 go build -o account-manager ./cmd/server
+./account-manager        # runs setup + starts server
 ```
 
-`npm run setup` prints generated client credentials to stdout on first run. Save them — they are not shown again.
+The binary runs setup automatically on first start: generates RSA keys, runs migrations, seeds OAuth clients. Generated client credentials are printed to stdout once.
 
 ## Token design
 
@@ -50,30 +63,48 @@ All tokens are RS256 JWTs signed with the private key in `DATA_DIR/keys/private.
 | `gamebacklog` | game backlog app (via PKCE flow) | 1h | gamebacklog API |
 | `mcp` | Claude.ai (via MCP OAuth flow) | 30d | MCP server in gamebacklog |
 
-`signToken(sub, audience, expiresIn)` is the single signing function. Relying parties verify locally using the public key from `/.well-known/jwks.json` — no round-trip to account-manager needed.
+`auth.SignToken(priv, issuer, sub, audience, duration)` is the single signing function. Relying parties verify locally using the public key from `/.well-known/jwks.json` — no round-trip needed.
 
 ## OAuth clients
 
-Two well-known clients are seeded by `scripts/setup.js`:
+Two well-known clients are seeded at first startup via `internal/setup/setup.go`:
 
 - `claude-mcp` — Claude.ai's MCP connector. Audience `mcp`.
 - `gamebacklog-web` — game backlog PKCE login flow. Audience `gamebacklog`.
 
-Client credentials are auto-generated on first setup and stored hashed in SQLite. The plaintext secret is only printed once at setup time. To rotate: delete the row from `oauth_clients` and re-run `npm run setup`.
+Client credentials are auto-generated and stored hashed in SQLite. The plaintext secret is only printed once at first startup. To rotate: delete the row from `oauth_clients` and restart.
 
-The `/authorize` endpoint accepts already-authenticated users (valid `refreshToken` cookie) without prompting for credentials — the consent page only appears when the session is absent.
+The `/authorize` endpoint skips the consent page for already-authenticated users (valid `refreshToken` cookie).
 
 ## Login flow (account-manager UI)
 
-1. `POST /api/auth/login` — password check → returns short-lived `mfaToken` (RS256, 5m, `mfaPending: true`)
+1. `POST /api/auth/login` — PBKDF2 password check → returns short-lived `mfaToken` (RS256, 5m, `mfaPending: true`)
 2. `POST /api/auth/mfa` — TOTP check → sets `refreshToken` httpOnly cookie (30d), returns `accessToken` (1h)
-3. On subsequent loads: `POST /api/auth/refresh` (requires CSRF token) → returns fresh `accessToken`
+3. On subsequent loads: `POST /api/auth/refresh` (CSRF-protected) → returns fresh `accessToken`
+
+## Validation rules
+
+- **Usernames**: `[a-zA-Z0-9_-]`, 1–32 characters. Enforced at setup, invite accept, and (via WebAuthn) passkey registration.
+- **Passwords**: minimum 12 characters. Enforced at setup, invite accept, change-password, reset-password, and WebAuthn passkey setup.
+- **Email**: optional everywhere. When provided, must match `user@domain.tld` format.
 
 ## Database (SQLite)
 
-Auth tables only — no game data. Key tables: `credentials`, `refresh_tokens`, `passkey_credentials`, `webauthn_challenges`, `setup_state`, `pending_setup`, `oauth_clients`, `oauth_auth_codes`, `oauth_refresh_tokens`.
+Auth tables only — no game data. Tables: `users`, `refresh_tokens`, `passkey_credentials`, `webauthn_challenges`, `setup_state`, `pending_setup`, `oauth_clients`, `oauth_auth_codes`, `oauth_refresh_tokens`, `pending_invites`, `password_reset_tokens`.
 
-DB file lives at `DATA_DIR/account-manager.db` (default: `./data/account-manager.db`).
+DB file: `DATA_DIR/account-manager.db` (default: `./data/account-manager.db`).
+
+Uses `modernc.org/sqlite` (pure Go, no CGO) — no C toolchain needed.
+
+## SMTP / email
+
+Password reset emails require SMTP. Three TLS modes via `SMTP_TLS`:
+
+| Mode | Port | Use |
+|------|------|-----|
+| `starttls` (default) | 587 | Standard submission, upgrades to TLS |
+| `tls` | 465 | Implicit TLS (SMTPS) |
+| `none` | any | Dev only — no encryption |
 
 ## Environment variables
 
@@ -88,7 +119,12 @@ WEBAUTHN_RP_ID=localhost
 GAMEBACKLOG_REDIRECT_URI=http://localhost:3000/auth/callback
 ```
 
-`PRIVATE_KEY_PATH` and `PUBLIC_KEY_PATH` are set programmatically by `scripts/setup.js` and do not need to be in `.env` unless you want to override key locations.
+## Testing
+
+```bash
+go test ./...            # unit + integration tests
+npm run test:e2e         # Playwright e2e (requires Go binary + npm run build)
+```
 
 ## Deployment
 
