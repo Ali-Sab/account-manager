@@ -23,6 +23,12 @@ func Open(dbPath string) (*sql.DB, error) {
 	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
 		return nil, err
 	}
+	// Without this, a writer that can't immediately acquire the lock (e.g. two
+	// transactions racing on BEGIN IMMEDIATE) fails instantly with "database
+	// is locked" instead of waiting briefly for the other to commit.
+	if _, err := db.Exec("PRAGMA busy_timeout = 5000"); err != nil {
+		return nil, err
+	}
 	if err := migrate(db); err != nil {
 		return nil, err
 	}

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { useAuth } from "../context/AuthContext";
 
@@ -34,6 +34,7 @@ export function SetupScreen() {
   const [emailPending, setEmailPending]     = useState(false);
   const [error, setError]         = useState("");
   const [loading, setLoading]     = useState(false);
+  const submittingRef = useRef(false);
 
   useEffect(() => {
     api("GET", "/api/setup/secret", undefined, false).then(data => {
@@ -46,18 +47,24 @@ export function SetupScreen() {
   }, []);
 
   async function submitSetup(code = totpCode) {
+    if (submittingRef.current) return;
     setError("");
     if (!username.trim()) return setError("Username required");
     if (password.length < 12) return setError("Password must be at least 12 characters");
     if (password !== password2) return setError("Passwords do not match");
     if (!code) return setError("Enter the 6-digit code from your authenticator app");
+    submittingRef.current = true;
     setLoading(true);
-    const data = await api("POST", "/api/setup", { username: username.trim(), email: email.trim(), password, totpCode: code }, false);
-    setLoading(false);
-    if (data.error) return setError(data.error as string);
-    setRecoveryCodes(data.recoveryCodes as string[]);
-    setEmailPending(data.emailPending === true);
-    setStep("done");
+    try {
+      const data = await api("POST", "/api/setup", { username: username.trim(), email: email.trim(), password, totpCode: code }, false);
+      if (data.error) return setError(data.error as string);
+      setRecoveryCodes(data.recoveryCodes as string[]);
+      setEmailPending(data.emailPending === true);
+      setStep("done");
+    } finally {
+      submittingRef.current = false;
+      setLoading(false);
+    }
   }
 
   function handleTotpChange(val: string) {

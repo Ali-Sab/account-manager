@@ -1,10 +1,16 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"time"
 )
+
+// ErrAlreadyConfigured is returned by CreateFirstUser when a user already
+// exists, so callers can distinguish "lost the race" from other failures.
+var ErrAlreadyConfigured = errors.New("already configured")
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -138,6 +144,60 @@ func CreateUser(db *sql.DB, u *User) error {
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		u.Username, u.Email, u.Hash, u.Salt, u.TotpSecret, string(codes), isAdmin, u.CreatedAt)
 	return err
+}
+
+// CreateFirstUser inserts u only if no user exists yet, atomically — the
+// count check and insert happen under a single BEGIN IMMEDIATE transaction,
+// so two concurrent calls (e.g. a duplicate setup-wizard submission) can't
+// both pass the check before either commits. A plain db.Begin() isn't enough
+// here: SQLite's default deferred BEGIN doesn't take the write lock until
+// the first write statement, so two transactions could both read count=0
+// before either INSERTs. BEGIN IMMEDIATE grabs the write lock up front,
+// serializing the two attempts — the loser sees count>0 and returns
+// ErrAlreadyConfigured deterministically. database/sql's Tx has no way to
+// request BEGIN IMMEDIATE, so this uses a pinned *sql.Conn and issues it as
+// raw SQL instead.
+func CreateFirstUser(ctx context.Context, database *sql.DB, u *User) error {
+	conn, err := database.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			conn.ExecContext(ctx, "ROLLBACK") //nolint:errcheck
+		}
+	}()
+
+	var n int
+	if err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM users").Scan(&n); err != nil {
+		return err
+	}
+	if n > 0 {
+		return ErrAlreadyConfigured
+	}
+
+	codes, _ := json.Marshal(u.RecoveryCodes)
+	isAdmin := 0
+	if u.IsAdmin {
+		isAdmin = 1
+	}
+	if _, err := conn.ExecContext(ctx, `
+		INSERT INTO users (username, email, hash, salt, totp_secret, recovery_codes, is_admin, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		u.Username, u.Email, u.Hash, u.Salt, u.TotpSecret, string(codes), isAdmin, u.CreatedAt); err != nil {
+		return err
+	}
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return err
+	}
+	committed = true
+	return nil
 }
 
 func UpdateUser(db *sql.DB, u *User) error {

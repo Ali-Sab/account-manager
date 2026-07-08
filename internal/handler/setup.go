@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -102,7 +103,7 @@ func (a *App) Setup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	username := strings.TrimSpace(body.Username)
-	if err := db.CreateUser(a.DB, &db.User{
+	if err := db.CreateFirstUser(r.Context(), a.DB, &db.User{
 		Username:      username,
 		Hash:          hash,
 		Salt:          salt,
@@ -111,6 +112,10 @@ func (a *App) Setup(w http.ResponseWriter, r *http.Request) {
 		IsAdmin:       true,
 		CreatedAt:     time.Now().UnixMilli(),
 	}); err != nil {
+		if errors.Is(err, db.ErrAlreadyConfigured) {
+			jsonErr(w, http.StatusForbidden, "Already configured")
+			return
+		}
 		jsonErr(w, http.StatusInternalServerError, "Setup failed")
 		return
 	}
