@@ -37,7 +37,7 @@ account-manager/
 |---|---|---|
 | `PORT` | No | Listen port (default: `3001`) |
 | `DATA_DIR` | No | Persistent storage path (default: `./data`). Holds SQLite DB and RSA keys. |
-| `JWT_ISSUER` | Yes (prod) | Issuer claim in tokens, e.g. `https://yourpi.ts.net` |
+| `JWT_ISSUER` | Yes (prod) | Issuer claim in tokens, and the base URL every OAuth discovery endpoint (`authorization_endpoint`, `token_endpoint`, `jwks_uri`, etc.) is built from by literal string concatenation — must exactly match whatever public path prefix your reverse proxy routes to this service. In the homelab-infra deployment that's `https://yourpi.yourtailnet.ts.net/accounts` (note the `/accounts` suffix — nginx proxies `/accounts/*` here). Only omit the path prefix if account-manager is exposed at its own bare origin with no reverse-proxy prefix. |
 | `CSRF_SECRET` | Yes (prod) | Random string for CSRF token signing |
 | `WEBAUTHN_RP_ID` | Yes (prod) | Relying party ID — the bare hostname, e.g. `yourpi.ts.net` |
 | `WEBAUTHN_RP_NAME` | No | Human-readable name shown in passkey prompts |

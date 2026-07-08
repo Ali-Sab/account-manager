@@ -93,6 +93,7 @@ func buildRouter(app *App) http.Handler {
 
 	r.With(DiscoveryCORS).Get("/.well-known/jwks.json", app.JWKS)
 	r.With(DiscoveryCORS).Get("/.well-known/oauth-authorization-server", app.OAuthAuthorizationServer)
+	r.With(DiscoveryCORS).Get("/.well-known/oauth-authorization-server/*", app.OAuthAuthorizationServer)
 	r.Get("/authorize", app.AuthorizeGET)
 	r.Post("/authorize", app.AuthorizePOST)
 	r.Get("/token", app.TokenGET)

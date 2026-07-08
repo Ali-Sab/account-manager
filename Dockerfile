@@ -19,7 +19,10 @@ RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o account-manager ./cmd/server
 # Total image ~30-40 MB vs ~300 MB for the previous Node.js image.
 FROM alpine:3.20
 WORKDIR /app
-RUN apk add --no-cache ca-certificates tzdata
+# sqlite3 CLI is not used by the app itself (the Go binary uses a pure-Go
+# driver) — it's here so `docker compose exec account-manager sqlite3 ...`
+# works for ops tasks like homelab-infra's `make gen-client-*` targets.
+RUN apk add --no-cache ca-certificates tzdata sqlite
 COPY --from=go-builder /app/account-manager .
 COPY --from=frontend   /app/dist ./dist
 EXPOSE 3001

@@ -63,6 +63,12 @@ func main() {
 	// Discovery endpoints are public and cross-origin readable.
 	r.With(handler.DiscoveryCORS).Get("/.well-known/jwks.json", app.JWKS)
 	r.With(handler.DiscoveryCORS).Get("/.well-known/oauth-authorization-server", app.OAuthAuthorizationServer)
+	// RFC 8414 §3.1: when the issuer has a path component (ours does — JWT_ISSUER
+	// ends in /accounts), spec-compliant clients insert the well-known suffix
+	// *before* that path, e.g. /.well-known/oauth-authorization-server/accounts,
+	// rather than requesting the bare path above. The handler ignores any suffix
+	// and returns the same static metadata either way.
+	r.With(handler.DiscoveryCORS).Get("/.well-known/oauth-authorization-server/*", app.OAuthAuthorizationServer)
 	r.With(handler.DiscoveryCORS).Get("/.well-known/oauth-protected-resource", app.OAuthProtectedResource)
 	r.With(handler.DiscoveryCORS).Get("/.well-known/oauth-protected-resource/*", app.OAuthProtectedResource)
 	// Authorize: browser navigation only — no CORS needed. POST is CSRF-protected.
