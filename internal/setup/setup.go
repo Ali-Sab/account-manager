@@ -20,12 +20,14 @@ type ClientURIs struct {
 }
 
 // EnsureInitialized runs all idempotent startup tasks:
-// 1. Generate RSA keypair if absent
-// 2. DB migrations (handled by db.Open)
-// 3. Seed well-known OAuth clients if absent; apply backchannel URIs to existing ones
+//  1. Generate RSA keypair if absent
+//  2. DB migrations (handled by db.Open)
+//  3. Seed well-known OAuth clients if absent (claude-mcp, gamebacklog-web,
+//     service-manager, chore-chart, claude-portal); re-sync redirect and
+//     backchannel URIs on existing ones.
 //
 // Returns a loaded KeyPair and prints newly generated credentials to stdout.
-func EnsureInitialized(dataDir string, gamebacklog, serviceManager, choreChart ClientURIs, sqlDB *sql.DB) (*keys.KeyPair, error) {
+func EnsureInitialized(dataDir string, gamebacklog, serviceManager, choreChart, claudePortal ClientURIs, sqlDB *sql.DB) (*keys.KeyPair, error) {
 	// 1. RSA keys
 	kp, isNew, err := ensureKeys(dataDir)
 	if err != nil {
@@ -76,6 +78,15 @@ func EnsureInitialized(dataDir string, gamebacklog, serviceManager, choreChart C
 		fmt.Println("[setup] Chore Chart OAuth client created")
 	} else {
 		fmt.Println("[setup] Chore Chart OAuth client already exists, skipping")
+	}
+
+	if nc, err := seedClaudePortalClient(sqlDB, claudePortal); err != nil {
+		return nil, fmt.Errorf("seeding claude-portal client: %w", err)
+	} else if nc != nil {
+		newCreds = append(newCreds, *nc)
+		fmt.Println("[setup] Claude Portal OAuth client created")
+	} else {
+		fmt.Println("[setup] Claude Portal OAuth client already exists, skipping")
 	}
 
 	if len(newCreds) > 0 {
@@ -223,6 +234,39 @@ func seedServiceManagerClient(sqlDB *sql.DB, uris ClientURIs) (*newCred, error) 
 	return &newCred{
 		label:        "Service Manager web client (copy these into service-manager.env)",
 		clientID:     "service-manager",
+		clientSecret: secret,
+	}, nil
+}
+
+func seedClaudePortalClient(sqlDB *sql.DB, uris ClientURIs) (*newCred, error) {
+	if uris.RedirectURI == "" {
+		uris.RedirectURI = "http://localhost:7681/oauth/callback"
+	}
+	existing, err := db.GetOAuthClient(sqlDB, "claude-portal")
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		return applyClientURIs(sqlDB, existing, uris)
+	}
+	secret, err := randomHex(32)
+	if err != nil {
+		return nil, err
+	}
+	if err := db.UpsertOAuthClient(sqlDB, &db.OAuthClient{
+		ClientID:             "claude-portal",
+		ClientSecretHash:     sha256Hex(secret),
+		ClientSecret:         secret,
+		RedirectURIs:         []string{uris.RedirectURI},
+		Name:                 "Claude Portal",
+		Audience:             "claude-portal",
+		BackchannelLogoutURI: uris.BackchannelURI,
+	}); err != nil {
+		return nil, err
+	}
+	return &newCred{
+		label:        "Claude Portal web client (homelab-infra's make setup-portal-sso sets its own secret; you can ignore this one)",
+		clientID:     "claude-portal",
 		clientSecret: secret,
 	}, nil
 }

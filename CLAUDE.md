@@ -61,16 +61,20 @@ All tokens are RS256 JWTs signed with the private key in `DATA_DIR/keys/private.
 |---|---|---|---|
 | `account-manager` | account-manager React SPA | 1h | account-manager UI routes |
 | `gamebacklog` | game backlog app (via PKCE flow) | 1h | gamebacklog API |
+| `claude-portal` | claude-portal (homelab-infra, served at `/claude/`) via PKCE flow | 1h | claude-portal |
 | `mcp` | Claude.ai (via MCP OAuth flow) | 30d | MCP server in gamebacklog |
 
 `auth.SignToken(priv, issuer, sub, audience, duration)` is the single signing function. Relying parties verify locally using the public key from `/.well-known/jwks.json` — no round-trip needed.
 
 ## OAuth clients
 
-Two well-known clients are seeded at first startup via `internal/setup/setup.go`:
+Five well-known clients are seeded at first startup via `internal/setup/setup.go`:
 
 - `claude-mcp` — Claude.ai's MCP connector. Audience `mcp`.
-- `gamebacklog-web` — game backlog PKCE login flow. Audience `gamebacklog`.
+- `gamebacklog-web` — game backlog PKCE login flow. Audience `gamebacklog`. Redirect from `GAMEBACKLOG_REDIRECT_URI`, re-synced at start.
+- `service-manager` — service-manager PKCE login flow. Audience `service-manager`. Redirect from `SERVICE_MANAGER_REDIRECT_URI`, re-synced at start.
+- `chore-chart` — chore-chart PKCE login flow. Audience `chore-chart`. Redirect from `CHORE_CHART_REDIRECT_URI`, re-synced at start.
+- `claude-portal` — claude-portal account login. Audience `claude-portal`. Redirect from `CLAUDE_PORTAL_REDIRECT_URI`, re-synced at start. Its secret is also set by homelab-infra's `make setup-portal-sso`, which overrides the one printed here.
 
 Client credentials are auto-generated and stored hashed in SQLite. The plaintext secret is only printed once at first startup. To rotate: delete the row from `oauth_clients` and restart.
 
@@ -117,6 +121,7 @@ CSRF_SECRET=
 JWT_ISSUER=http://localhost:3001       # must match the issuer claim in tokens
 WEBAUTHN_RP_ID=localhost
 GAMEBACKLOG_REDIRECT_URI=http://localhost:3000/auth/callback
+CLAUDE_PORTAL_REDIRECT_URI=http://localhost:7681/oauth/callback
 ```
 
 ## Testing

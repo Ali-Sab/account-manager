@@ -37,6 +37,7 @@ func main() {
 		setup.ClientURIs{RedirectURI: cfg.GamebacklogRedirect, BackchannelURI: cfg.GamebacklogBackchannelURI},
 		setup.ClientURIs{RedirectURI: cfg.ServiceManagerRedirect, BackchannelURI: cfg.ServiceManagerBackchannelURI},
 		setup.ClientURIs{RedirectURI: cfg.ChoreChartRedirect, BackchannelURI: cfg.ChoreChartBackchannelURI},
+		setup.ClientURIs{RedirectURI: cfg.ClaudePortalRedirect},
 		sqlDB,
 	)
 	if err != nil {

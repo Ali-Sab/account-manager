@@ -21,6 +21,7 @@ type Config struct {
 	GamebacklogBackchannelURI       string
 	ServiceManagerBackchannelURI    string
 	ChoreChartBackchannelURI        string
+	ClaudePortalRedirect            string
 	SMTPHost              string
 	SMTPPort              string
 	SMTPUser              string
@@ -51,6 +52,7 @@ func Load() *Config {
 		GamebacklogBackchannelURI:     getenv("GAMEBACKLOG_BACKCHANNEL_URI", ""),
 		ServiceManagerBackchannelURI:  getenv("SERVICE_MANAGER_BACKCHANNEL_URI", ""),
 		ChoreChartBackchannelURI:      getenv("CHORE_CHART_BACKCHANNEL_URI", ""),
+		ClaudePortalRedirect:          getenv("CLAUDE_PORTAL_REDIRECT_URI", "http://localhost:7681/oauth/callback"),
 		SMTPHost:               getenv("SMTP_HOST", ""),
 		SMTPPort:               getenv("SMTP_PORT", "587"),
 		SMTPUser:               getenv("SMTP_USER", ""),

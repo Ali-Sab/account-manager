@@ -143,6 +143,7 @@ Tokens are RS256 JWTs signed with `DATA_DIR/keys/private.pem`.
 | `gamebacklog` | game-backlog service | 1 h | game-backlog |
 | `service-manager` | service-manager | 1 h | service-manager |
 | `chore-chart` | chore-chart | 1 h | chore-chart |
+| `claude-portal` | claude-portal | 1 h | claude-portal |
 | `mcp` | Claude.ai via MCP connector | 30 d | game-backlog MCP server |
 
 The public key is exposed at `GET /.well-known/jwks.json`. Relying parties fetch it at startup or via the `ACCOUNT_MANAGER_PUBLIC_KEY` env var (PEM contents of `data/keys/public.pem`).
