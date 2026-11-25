@@ -3,6 +3,9 @@ package auth
 import (
 	"crypto/rand"
 	"crypto/rsa"
+	"encoding/base64"
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
@@ -105,5 +108,78 @@ func TestVerifyMFAToken_Expired(t *testing.T) {
 	// Just verify the function rejects tampered token strings.
 	if _, err := VerifyMFAToken(pub, issuer, "not.a.token"); err == nil {
 		t.Error("expected error for malformed token")
+	}
+}
+
+// payloadMap decodes the (unverified) payload segment of a JWT into a map.
+func payloadMap(t *testing.T, token string) map[string]any {
+	t.Helper()
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		t.Fatalf("expected 3 JWT segments, got %d", len(parts))
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	return m
+}
+
+func TestSignAccessToken_Admin(t *testing.T) {
+	priv, pub := testKeyPair(t)
+	issuer := "http://localhost:3001"
+
+	token, err := SignAccessToken(priv, issuer, "alice", "account-manager", true, time.Hour)
+	if err != nil {
+		t.Fatalf("SignAccessToken: %v", err)
+	}
+	claims, err := VerifyAccess(pub, issuer, token)
+	if err != nil {
+		t.Fatalf("VerifyAccess: %v", err)
+	}
+	if !claims.Admin {
+		t.Error("expected Admin=true")
+	}
+	if claims.Subject != "alice" {
+		t.Errorf("expected subject alice, got %s", claims.Subject)
+	}
+	if got := payloadMap(t, token)["admin"]; got != true {
+		t.Errorf("expected payload admin=true, got %v", got)
+	}
+}
+
+func TestSignToken_NoAdminClaim(t *testing.T) {
+	priv, _ := testKeyPair(t)
+
+	token, err := SignToken(priv, "http://localhost:3001", "alice", "account-manager", time.Hour)
+	if err != nil {
+		t.Fatalf("SignToken: %v", err)
+	}
+	if _, ok := payloadMap(t, token)["admin"]; ok {
+		t.Error("SignToken must not emit an admin claim")
+	}
+}
+
+func TestSignAccessToken_NotAdminOmitsClaim(t *testing.T) {
+	priv, pub := testKeyPair(t)
+	issuer := "http://localhost:3001"
+
+	token, err := SignAccessToken(priv, issuer, "bob", "account-manager", false, time.Hour)
+	if err != nil {
+		t.Fatalf("SignAccessToken: %v", err)
+	}
+	if _, ok := payloadMap(t, token)["admin"]; ok {
+		t.Error("non-admin token must omit the admin claim")
+	}
+	claims, err := VerifyAccess(pub, issuer, token)
+	if err != nil {
+		t.Fatalf("VerifyAccess: %v", err)
+	}
+	if claims.Admin || claims.Subject != "bob" {
+		t.Errorf("unexpected claims: admin=%v sub=%s", claims.Admin, claims.Subject)
 	}
 }

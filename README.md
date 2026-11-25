@@ -146,6 +146,8 @@ Tokens are RS256 JWTs signed with `DATA_DIR/keys/private.pem`.
 | `claude-portal` | claude-portal | 1 h | claude-portal |
 | `mcp` | Claude.ai via MCP connector | 30 d | game-backlog MCP server |
 
+OAuth access tokens issued by `/token` to the admin user carry `"admin": true` on every audience; other users' tokens carry no `admin` claim. The flag is re-read on every refresh. Discovery lists `admin` in `claims_supported`.
+
 The public key is exposed at `GET /.well-known/jwks.json`. Relying parties fetch it at startup or via the `ACCOUNT_MANAGER_PUBLIC_KEY` env var (PEM contents of `data/keys/public.pem`).
 
 ---

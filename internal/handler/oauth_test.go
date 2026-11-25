@@ -10,8 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"account-manager/internal/auth"
 	"account-manager/internal/db"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/pquerna/otp/totp"
 )
 
@@ -44,6 +46,21 @@ func TestOAuthAuthorizationServer(t *testing.T) {
 	for _, field := range []string{"issuer", "authorization_endpoint", "token_endpoint", "jwks_uri"} {
 		if resp[field] == "" || resp[field] == nil {
 			t.Errorf("missing field %q in authorization server metadata", field)
+		}
+	}
+	claimsSupported, ok := resp["claims_supported"].([]any)
+	if !ok {
+		t.Fatalf("claims_supported missing or not an array: %v", resp["claims_supported"])
+	}
+	for _, want := range []string{"iss", "sub", "aud", "exp", "iat", "admin"} {
+		found := false
+		for _, c := range claimsSupported {
+			if c == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("claims_supported %v missing %q", claimsSupported, want)
 		}
 	}
 }
@@ -581,4 +598,172 @@ func TestAuthorizeEndpoint_NoCORSHeaders(t *testing.T) {
 // when the function is called from within this file).
 func generateTOTP(secret string) (string, error) {
 	return totp.GenerateCode(secret, time.Now())
+}
+
+// accessClaims parses the claims of a JWT without verifying the signature.
+func accessClaims(t *testing.T, tok string) *auth.Claims {
+	t.Helper()
+	claims := &auth.Claims{}
+	if _, _, err := jwt.NewParser().ParseUnverified(tok, claims); err != nil {
+		t.Fatalf("parse access token: %v", err)
+	}
+	return claims
+}
+
+// accessPayload parses the raw claims of a JWT without verifying the signature.
+func accessPayload(t *testing.T, tok string) map[string]any {
+	t.Helper()
+	m := jwt.MapClaims{}
+	if _, _, err := jwt.NewParser().ParseUnverified(tok, m); err != nil {
+		t.Fatalf("parse access token: %v", err)
+	}
+	return m
+}
+
+// exchangeAuthCode plants an auth code for username and redeems it at /token.
+func exchangeAuthCode(t *testing.T, app *App, username string) (code int, body string, accessToken string) {
+	t.Helper()
+	router := buildRouter(app)
+	clientID, clientSecret := seedOAuthClient(t, app)
+
+	verifier := "testverifier12345678901234567890123456789012345"
+	h := sha256.Sum256([]byte(verifier))
+	challenge := base64.RawURLEncoding.EncodeToString(h[:])
+
+	authCode := "authcode-" + username
+	db.SaveOAuthAuthCode(app.DB, authCode, clientID, "http://localhost:3000/cb", challenge, "S256", time.Now().Add(5*time.Minute).UnixMilli(), username) //nolint:errcheck
+
+	w := doRequest(t, router, http.MethodPost, "/token",
+		jsonBody(t, map[string]string{
+			"grant_type":    "authorization_code",
+			"code":          authCode,
+			"redirect_uri":  "http://localhost:3000/cb",
+			"code_verifier": verifier,
+			"client_id":     clientID,
+			"client_secret": clientSecret,
+		}), nil, nil)
+	var resp struct {
+		AccessToken string `json:"access_token"`
+	}
+	if w.Code == http.StatusOK {
+		decodeJSON(t, strings.NewReader(w.Body.String()), &resp)
+	}
+	return w.Code, w.Body.String(), resp.AccessToken
+}
+
+func TestTokenEndpoint_AuthCodeGrant_AdminClaim(t *testing.T) {
+	app := newTestApp(t)
+	seedAccount(t, app.DB) // alice, IsAdmin: true
+
+	code, body, tok := exchangeAuthCode(t, app, "alice")
+	if code != http.StatusOK {
+		t.Fatalf("token: want 200, got %d: %s", code, body)
+	}
+	claims := accessClaims(t, tok)
+	if !claims.Admin {
+		t.Error("expected admin=true for admin user")
+	}
+	if claims.Subject != "alice" {
+		t.Errorf("expected subject alice, got %q", claims.Subject)
+	}
+	// The client audience is gamebacklog: the claim goes on every audience.
+	if len(claims.Audience) != 1 || claims.Audience[0] != "gamebacklog" {
+		t.Errorf("expected audience [gamebacklog], got %v", claims.Audience)
+	}
+	if got := accessPayload(t, tok)["admin"]; got != true {
+		t.Errorf("expected payload admin=true, got %v", got)
+	}
+}
+
+func TestTokenEndpoint_AuthCodeGrant_NonAdminNoClaim(t *testing.T) {
+	app := newTestApp(t)
+	seedAccount(t, app.DB)
+	if err := db.CreateUser(app.DB, &db.User{
+		Username:  "bob",
+		Hash:      "x",
+		Salt:      "y",
+		IsAdmin:   false,
+		CreatedAt: time.Now().UnixMilli(),
+	}); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	code, body, tok := exchangeAuthCode(t, app, "bob")
+	if code != http.StatusOK {
+		t.Fatalf("token: want 200, got %d: %s", code, body)
+	}
+	if _, ok := accessPayload(t, tok)["admin"]; ok {
+		t.Error("non-admin access token must not carry an admin claim")
+	}
+	if claims := accessClaims(t, tok); claims.Admin || claims.Subject != "bob" {
+		t.Errorf("unexpected claims: admin=%v sub=%q", claims.Admin, claims.Subject)
+	}
+}
+
+func TestTokenEndpoint_RefreshReReadsAdmin(t *testing.T) {
+	app := newTestApp(t)
+	router := buildRouter(app)
+	clientID, clientSecret := seedOAuthClient(t, app)
+	seedAccount(t, app.DB)
+
+	refresh := func(rt string) (int, string, string) {
+		h := sha256.Sum256([]byte(rt))
+		db.SaveOAuthRefreshToken(app.DB, hex.EncodeToString(h[:]), clientID, time.Now().Add(365*24*time.Hour).UnixMilli(), "alice") //nolint:errcheck
+		w := doRequest(t, router, http.MethodPost, "/token",
+			jsonBody(t, map[string]string{
+				"grant_type":    "refresh_token",
+				"refresh_token": rt,
+				"client_id":     clientID,
+				"client_secret": clientSecret,
+			}), nil, nil)
+		var resp struct {
+			AccessToken string `json:"access_token"`
+		}
+		if w.Code == http.StatusOK {
+			decodeJSON(t, strings.NewReader(w.Body.String()), &resp)
+		}
+		return w.Code, w.Body.String(), resp.AccessToken
+	}
+
+	// While alice is admin the refreshed token carries the claim.
+	code, body, tok := refresh("refresh-while-admin")
+	if code != http.StatusOK {
+		t.Fatalf("refresh (admin): want 200, got %d: %s", code, body)
+	}
+	if !accessClaims(t, tok).Admin {
+		t.Error("expected admin=true on refresh while user is admin")
+	}
+
+	// Demote alice; the next refresh must drop the claim.
+	user, err := db.GetUser(app.DB, "alice")
+	if err != nil || user == nil {
+		t.Fatalf("GetUser: %v %v", user, err)
+	}
+	user.IsAdmin = false
+	if err := db.UpdateUser(app.DB, user); err != nil {
+		t.Fatalf("UpdateUser: %v", err)
+	}
+	code, body, tok = refresh("refresh-after-demotion")
+	if code != http.StatusOK {
+		t.Fatalf("refresh (demoted): want 200, got %d: %s", code, body)
+	}
+	if _, ok := accessPayload(t, tok)["admin"]; ok {
+		t.Error("demoted user's refreshed token must not carry an admin claim")
+	}
+}
+
+func TestTokenEndpoint_DeletedUserInvalidGrant(t *testing.T) {
+	app := newTestApp(t)
+	seedAccount(t, app.DB)
+
+	code, body, _ := exchangeAuthCode(t, app, "ghost")
+	if code != http.StatusBadRequest {
+		t.Fatalf("want 400, got %d: %s", code, body)
+	}
+	if !strings.Contains(body, "invalid_grant") {
+		t.Errorf("expected invalid_grant, got %s", body)
+	}
+	if strings.Contains(body, "access_token") {
+		t.Errorf("response must not contain an access_token: %s", body)
+	}
 }

@@ -92,6 +92,7 @@ func (a *App) OAuthAuthorizationServer(w http.ResponseWriter, r *http.Request) {
 		"grant_types_supported":                 []string{"authorization_code", "refresh_token"},
 		"code_challenge_methods_supported":      []string{"S256"},
 		"token_endpoint_auth_methods_supported": []string{"client_secret_post"},
+		"claims_supported":                      []string{"iss", "sub", "aud", "exp", "iat", "admin"},
 		"end_session_endpoint":                  issuer + "/logout",
 	})
 }
@@ -387,6 +388,16 @@ func (a *App) tokenRefresh(w http.ResponseWriter, params map[string]string, clie
 }
 
 func (a *App) issueOAuthTokens(w http.ResponseWriter, client *db.OAuthClient, username string) {
+	user, err := db.GetUser(a.DB, username)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "server_error")
+		return
+	}
+	if user == nil {
+		jsonErr(w, http.StatusBadRequest, "invalid_grant")
+		return
+	}
+
 	isMCP := client.Audience == "mcp"
 	var accessExpiry time.Duration
 	var accessSeconds int
@@ -398,7 +409,7 @@ func (a *App) issueOAuthTokens(w http.ResponseWriter, client *db.OAuthClient, us
 		accessSeconds = 3600
 	}
 
-	accessToken, err := auth.SignToken(a.privateKey(), a.Cfg.JWTIssuer, username, client.Audience, accessExpiry)
+	accessToken, err := auth.SignAccessToken(a.privateKey(), a.Cfg.JWTIssuer, username, client.Audience, user.IsAdmin, accessExpiry)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "server_error")
 		return

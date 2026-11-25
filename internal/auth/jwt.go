@@ -12,10 +12,12 @@ import (
 type Claims struct {
 	jwt.RegisteredClaims
 	MFAPending bool `json:"mfaPending,omitempty"`
+	// Set by SignAccessToken when admin is true; omitted otherwise.
+	Admin bool `json:"admin,omitempty"`
 }
 
-// SignToken issues an RS256 JWT. duration is a Go time.Duration (e.g. time.Hour).
-func SignToken(priv *rsa.PrivateKey, issuer, sub, audience string, duration time.Duration) (string, error) {
+// SignAccessToken issues an RS256 JWT like SignToken and sets the admin claim when admin is true.
+func SignAccessToken(priv *rsa.PrivateKey, issuer, sub, audience string, admin bool, duration time.Duration) (string, error) {
 	now := time.Now()
 	claims := Claims{
 		RegisteredClaims: jwt.RegisteredClaims{
@@ -25,9 +27,15 @@ func SignToken(priv *rsa.PrivateKey, issuer, sub, audience string, duration time
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(duration)),
 		},
+		Admin: admin,
 	}
 	t := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 	return t.SignedString(priv)
+}
+
+// SignToken issues an RS256 JWT. duration is a Go time.Duration (e.g. time.Hour).
+func SignToken(priv *rsa.PrivateKey, issuer, sub, audience string, duration time.Duration) (string, error) {
+	return SignAccessToken(priv, issuer, sub, audience, false, duration)
 }
 
 // VerifyAccess validates a token for the account-manager audience.

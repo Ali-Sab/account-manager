@@ -64,7 +64,9 @@ All tokens are RS256 JWTs signed with the private key in `DATA_DIR/keys/private.
 | `claude-portal` | claude-portal (homelab-infra, served at `/claude/`) via PKCE flow | 1h | claude-portal |
 | `mcp` | Claude.ai (via MCP OAuth flow) | 30d | MCP server in gamebacklog |
 
-`auth.SignToken(priv, issuer, sub, audience, duration)` is the single signing function. Relying parties verify locally using the public key from `/.well-known/jwks.json` — no round-trip needed.
+`auth.SignToken(priv, issuer, sub, audience, duration)` signs tokens without an admin claim. `auth.SignAccessToken(priv, issuer, sub, audience, admin, duration)` is the same signer and is used by `/token`; it sets `"admin": true` when `admin` is true. Relying parties verify locally using the public key from `/.well-known/jwks.json` — no round-trip needed.
+
+OAuth access tokens (`/token`) of the admin user (`users.is_admin = 1`) carry `"admin": true` on every audience; other users' tokens carry no `admin` claim. The flag is re-read from the DB on every token grant, including refresh, so a demoted admin stops getting the claim on the next refresh. `claude-portal` admits only tokens with `admin: true`. Discovery (`/.well-known/oauth-authorization-server`) lists `admin` in `claims_supported`. A `/token` request for a user that no longer exists gets `400 invalid_grant`. The admin flag is read only at grant and refresh time, so a demoted admin's existing access token keeps the `admin` claim until it expires (up to 30 days for the `mcp` audience).
 
 ## OAuth clients
 
