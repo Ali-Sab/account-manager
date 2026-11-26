@@ -62,21 +62,23 @@ All tokens are RS256 JWTs signed with the private key in `DATA_DIR/keys/private.
 | `account-manager` | account-manager React SPA | 1h | account-manager UI routes |
 | `gamebacklog` | game backlog app (via PKCE flow) | 1h | gamebacklog API |
 | `claude-portal` | claude-portal (homelab-infra, served at `/claude/`) via PKCE flow | 1h | claude-portal |
+| `pi-health` | pi-health (homelab-infra, served at `/health/`) via PKCE flow | 1h | pi-health |
 | `mcp` | Claude.ai (via MCP OAuth flow) | 30d | MCP server in gamebacklog |
 
 `auth.SignToken(priv, issuer, sub, audience, duration)` signs tokens without an admin claim. `auth.SignAccessToken(priv, issuer, sub, audience, admin, duration)` is the same signer and is used by `/token`; it sets `"admin": true` when `admin` is true. Relying parties verify locally using the public key from `/.well-known/jwks.json` — no round-trip needed.
 
-OAuth access tokens (`/token`) of the admin user (`users.is_admin = 1`) carry `"admin": true` on every audience; other users' tokens carry no `admin` claim. The flag is re-read from the DB on every token grant, including refresh, so a demoted admin stops getting the claim on the next refresh. `claude-portal` admits only tokens with `admin: true`. Discovery (`/.well-known/oauth-authorization-server`) lists `admin` in `claims_supported`. A `/token` request for a user that no longer exists gets `400 invalid_grant`. The admin flag is read only at grant and refresh time, so a demoted admin's existing access token keeps the `admin` claim until it expires (up to 30 days for the `mcp` audience).
+OAuth access tokens (`/token`) of the admin user (`users.is_admin = 1`) carry `"admin": true` on every audience; other users' tokens carry no `admin` claim. The flag is re-read from the DB on every token grant, including refresh, so a demoted admin stops getting the claim on the next refresh. `claude-portal` and `pi-health` admit only tokens with `admin: true`. Discovery (`/.well-known/oauth-authorization-server`) lists `admin` in `claims_supported`. A `/token` request for a user that no longer exists gets `400 invalid_grant`. The admin flag is read only at grant and refresh time, so a demoted admin's existing access token keeps the `admin` claim until it expires (up to 30 days for the `mcp` audience).
 
 ## OAuth clients
 
-Five well-known clients are seeded at first startup via `internal/setup/setup.go`:
+Six well-known clients are seeded at first startup via `internal/setup/setup.go`:
 
 - `claude-mcp` — Claude.ai's MCP connector. Audience `mcp`.
 - `gamebacklog-web` — game backlog PKCE login flow. Audience `gamebacklog`. Redirect from `GAMEBACKLOG_REDIRECT_URI`, re-synced at start.
 - `service-manager` — service-manager PKCE login flow. Audience `service-manager`. Redirect from `SERVICE_MANAGER_REDIRECT_URI`, re-synced at start.
 - `chore-chart` — chore-chart PKCE login flow. Audience `chore-chart`. Redirect from `CHORE_CHART_REDIRECT_URI`, re-synced at start.
 - `claude-portal` — claude-portal account login. Audience `claude-portal`. Redirect from `CLAUDE_PORTAL_REDIRECT_URI`, re-synced at start. Its secret is also set by homelab-infra's `make setup-portal-sso`, which overrides the one printed here.
+- `pi-health` — pi-health device health page, PKCE login flow. Audience `pi-health`. Redirect from `PI_HEALTH_REDIRECT_URI` and back-channel URI from `PI_HEALTH_BACKCHANNEL_URI`, re-synced at start. pi-health admits only tokens with `admin: true`.
 
 Client credentials are auto-generated and stored hashed in SQLite. The plaintext secret is only printed once at first startup. To rotate: delete the row from `oauth_clients` and restart.
 
@@ -124,6 +126,7 @@ JWT_ISSUER=http://localhost:3001       # must match the issuer claim in tokens
 WEBAUTHN_RP_ID=localhost
 GAMEBACKLOG_REDIRECT_URI=http://localhost:3000/auth/callback
 CLAUDE_PORTAL_REDIRECT_URI=http://localhost:7681/oauth/callback
+PI_HEALTH_REDIRECT_URI=http://localhost:8084/health/oauth/callback
 ```
 
 ## Testing

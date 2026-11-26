@@ -23,11 +23,11 @@ type ClientURIs struct {
 //  1. Generate RSA keypair if absent
 //  2. DB migrations (handled by db.Open)
 //  3. Seed well-known OAuth clients if absent (claude-mcp, gamebacklog-web,
-//     service-manager, chore-chart, claude-portal); re-sync redirect and
-//     backchannel URIs on existing ones.
+//     service-manager, chore-chart, claude-portal, pi-health); re-sync
+//     redirect and backchannel URIs on existing ones.
 //
 // Returns a loaded KeyPair and prints newly generated credentials to stdout.
-func EnsureInitialized(dataDir string, gamebacklog, serviceManager, choreChart, claudePortal ClientURIs, sqlDB *sql.DB) (*keys.KeyPair, error) {
+func EnsureInitialized(dataDir string, gamebacklog, serviceManager, choreChart, claudePortal, piHealth ClientURIs, sqlDB *sql.DB) (*keys.KeyPair, error) {
 	// 1. RSA keys
 	kp, isNew, err := ensureKeys(dataDir)
 	if err != nil {
@@ -87,6 +87,15 @@ func EnsureInitialized(dataDir string, gamebacklog, serviceManager, choreChart, 
 		fmt.Println("[setup] Claude Portal OAuth client created")
 	} else {
 		fmt.Println("[setup] Claude Portal OAuth client already exists, skipping")
+	}
+
+	if nc, err := seedPiHealthClient(sqlDB, piHealth); err != nil {
+		return nil, fmt.Errorf("seeding pi-health client: %w", err)
+	} else if nc != nil {
+		newCreds = append(newCreds, *nc)
+		fmt.Println("[setup] Pi Health OAuth client created")
+	} else {
+		fmt.Println("[setup] Pi Health OAuth client already exists, skipping")
 	}
 
 	if len(newCreds) > 0 {
@@ -267,6 +276,39 @@ func seedClaudePortalClient(sqlDB *sql.DB, uris ClientURIs) (*newCred, error) {
 	return &newCred{
 		label:        "Claude Portal web client (homelab-infra's make setup-portal-sso sets its own secret; you can ignore this one)",
 		clientID:     "claude-portal",
+		clientSecret: secret,
+	}, nil
+}
+
+func seedPiHealthClient(sqlDB *sql.DB, uris ClientURIs) (*newCred, error) {
+	if uris.RedirectURI == "" {
+		uris.RedirectURI = "http://localhost:8084/health/oauth/callback"
+	}
+	existing, err := db.GetOAuthClient(sqlDB, "pi-health")
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		return applyClientURIs(sqlDB, existing, uris)
+	}
+	secret, err := randomHex(32)
+	if err != nil {
+		return nil, err
+	}
+	if err := db.UpsertOAuthClient(sqlDB, &db.OAuthClient{
+		ClientID:             "pi-health",
+		ClientSecretHash:     sha256Hex(secret),
+		ClientSecret:         secret,
+		RedirectURIs:         []string{uris.RedirectURI},
+		Name:                 "Pi Health",
+		Audience:             "pi-health",
+		BackchannelLogoutURI: uris.BackchannelURI,
+	}); err != nil {
+		return nil, err
+	}
+	return &newCred{
+		label:        "Pi Health web client (copy these into homelab-infra env/pi-health.env)",
+		clientID:     "pi-health",
 		clientSecret: secret,
 	}, nil
 }

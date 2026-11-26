@@ -22,6 +22,8 @@ type Config struct {
 	ServiceManagerBackchannelURI    string
 	ChoreChartBackchannelURI        string
 	ClaudePortalRedirect            string
+	PiHealthRedirect                string
+	PiHealthBackchannelURI          string
 	SMTPHost              string
 	SMTPPort              string
 	SMTPUser              string
@@ -53,6 +55,8 @@ func Load() *Config {
 		ServiceManagerBackchannelURI:  getenv("SERVICE_MANAGER_BACKCHANNEL_URI", ""),
 		ChoreChartBackchannelURI:      getenv("CHORE_CHART_BACKCHANNEL_URI", ""),
 		ClaudePortalRedirect:          getenv("CLAUDE_PORTAL_REDIRECT_URI", "http://localhost:7681/oauth/callback"),
+		PiHealthRedirect:              getenv("PI_HEALTH_REDIRECT_URI", "http://localhost:8084/health/oauth/callback"),
+		PiHealthBackchannelURI:        getenv("PI_HEALTH_BACKCHANNEL_URI", ""),
 		SMTPHost:               getenv("SMTP_HOST", ""),
 		SMTPPort:               getenv("SMTP_PORT", "587"),
 		SMTPUser:               getenv("SMTP_USER", ""),

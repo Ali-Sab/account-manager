@@ -144,6 +144,7 @@ Tokens are RS256 JWTs signed with `DATA_DIR/keys/private.pem`.
 | `service-manager` | service-manager | 1 h | service-manager |
 | `chore-chart` | chore-chart | 1 h | chore-chart |
 | `claude-portal` | claude-portal | 1 h | claude-portal |
+| `pi-health` | pi-health | 1 h | pi-health |
 | `mcp` | Claude.ai via MCP connector | 30 d | game-backlog MCP server |
 
 OAuth access tokens issued by `/token` to the admin user carry `"admin": true` on every audience; other users' tokens carry no `admin` claim. The flag is re-read on every refresh. Discovery lists `admin` in `claims_supported`.

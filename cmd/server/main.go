@@ -38,6 +38,7 @@ func main() {
 		setup.ClientURIs{RedirectURI: cfg.ServiceManagerRedirect, BackchannelURI: cfg.ServiceManagerBackchannelURI},
 		setup.ClientURIs{RedirectURI: cfg.ChoreChartRedirect, BackchannelURI: cfg.ChoreChartBackchannelURI},
 		setup.ClientURIs{RedirectURI: cfg.ClaudePortalRedirect},
+		setup.ClientURIs{RedirectURI: cfg.PiHealthRedirect, BackchannelURI: cfg.PiHealthBackchannelURI},
 		sqlDB,
 	)
 	if err != nil {
