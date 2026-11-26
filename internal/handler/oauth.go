@@ -290,12 +290,20 @@ func (a *App) AuthorizePOST(w http.ResponseWriter, r *http.Request) {
 		renderAuthorizePage(w, pageData)
 		return
 	}
+	release, ok := a.reserveSecondFactor(user.Username)
+	if !ok {
+		pageData.ErrorMsg = fmt.Sprintf("Too many attempts. Try again in %d minutes.", int(middleware.LimitWindow/time.Minute))
+		pageData.CSRFToken = middleware.GenerateCSRFToken(w, r, a.Cfg.CsrfSecret, a.Cfg.IsProd)
+		renderAuthorizePage(w, pageData)
+		return
+	}
 	if !auth.VerifyTOTP(user.TotpSecret, totp) {
 		pageData.ErrorMsg = "Incorrect 2FA code."
 		pageData.CSRFToken = middleware.GenerateCSRFToken(w, r, a.Cfg.CsrfSecret, a.Cfg.IsProd)
 		renderAuthorizePage(w, pageData)
 		return
 	}
+	release()
 
 	code := randomHex(32)
 	expiresAt := time.Now().Add(5 * time.Minute).UnixMilli()
@@ -323,8 +331,13 @@ func (a *App) TokenPOST(w http.ResponseWriter, r *http.Request) {
 	}
 
 	clientID, clientSecret := extractClientCreds(r, params)
-	client, _ := db.GetOAuthClient(a.DB, clientID)
 	w.Header().Set("Cache-Control", "no-store")
+	release, ok := a.reserveClientAuth(r)
+	if !ok {
+		tooManyAttempts(w)
+		return
+	}
+	client, _ := db.GetOAuthClient(a.DB, clientID)
 	if client == nil {
 		jsonErr(w, http.StatusUnauthorized, "invalid_client")
 		return
@@ -333,6 +346,7 @@ func (a *App) TokenPOST(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusUnauthorized, "invalid_client")
 		return
 	}
+	release()
 
 	switch params["grant_type"] {
 	case "authorization_code":

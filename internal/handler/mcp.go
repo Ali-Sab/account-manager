@@ -19,11 +19,17 @@ func (a *App) MCPClientInfo(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusUnauthorized, "credentials required")
 		return
 	}
+	release, ok := a.reserveClientAuth(r)
+	if !ok {
+		tooManyAttempts(w)
+		return
+	}
 	client, _ := db.GetOAuthClient(a.DB, clientID)
 	if client == nil || !timingSafeEqual(sha256Hex(clientSecret), client.ClientSecretHash) {
 		jsonErr(w, http.StatusUnauthorized, "invalid_client")
 		return
 	}
+	release()
 	if client.ClientID != mcpClientInfoCaller {
 		jsonErr(w, http.StatusForbidden, "client not allowed")
 		return
