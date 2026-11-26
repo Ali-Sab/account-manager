@@ -80,6 +80,8 @@ Six well-known clients are seeded at first startup via `internal/setup/setup.go`
 - `claude-portal` — claude-portal account login. Audience `claude-portal`. Redirect from `CLAUDE_PORTAL_REDIRECT_URI`, re-synced at start. Its secret is also set by homelab-infra's `make setup-portal-sso`, which overrides the one printed here.
 - `pi-health` — pi-health device health page, PKCE login flow. Audience `pi-health`. Redirect from `PI_HEALTH_REDIRECT_URI` and back-channel URI from `PI_HEALTH_BACKCHANNEL_URI`, re-synced at start. pi-health admits only tokens with `admin: true`.
 
+`POST /api/mcp-client` returns the `claude-mcp` credentials only to the `gamebacklog-web` client (HTTP Basic auth); other clients get 403. It ignores the request body.
+
 Client credentials are auto-generated and stored hashed in SQLite. The plaintext secret is only printed once at first startup. To rotate: delete the row from `oauth_clients` and restart.
 
 The `/authorize` endpoint skips the consent page for already-authenticated users (valid `refreshToken` cookie).
@@ -89,6 +91,7 @@ The `/authorize` endpoint skips the consent page for already-authenticated users
 1. `POST /api/auth/login` — PBKDF2 password check → returns short-lived `mfaToken` (RS256, 5m, `mfaPending: true`)
 2. `POST /api/auth/mfa` — TOTP check → sets `refreshToken` httpOnly cookie (30d), returns `accessToken` (1h)
 3. On subsequent loads: `POST /api/auth/refresh` (CSRF-protected) → returns fresh `accessToken`
+4. An account with no TOTP secret cannot pass a TOTP check. It signs in with a passkey, or with password plus a recovery code. Password reset by email needs a TOTP code.
 
 ## Validation rules
 

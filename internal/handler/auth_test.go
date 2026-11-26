@@ -1,7 +1,11 @@
 package handler
 
 import (
+	"database/sql"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -703,5 +707,160 @@ func TestResetPassword_RevokesExistingSessions(t *testing.T) {
 	_, valid := db.ValidateRefreshToken(app.DB, oldRT)
 	if valid {
 		t.Error("existing refresh token should be revoked after password reset")
+	}
+}
+
+// ─── Account without a TOTP secret ────────────────────────────────────────────
+
+// seedNoTOTPAccount creates an account with no TOTP secret and returns its recovery codes.
+func seedNoTOTPAccount(t *testing.T, sqlDB *sql.DB) (username, password string, recoveryCodes []string) {
+	t.Helper()
+	username = "nototp"
+	password = "password123"
+	salt := "deadbeefdeadbeefdeadbeefdeadbeef"
+	hash := auth.HashPassword(password, salt)
+	plain, hashes, err := auth.GenerateRecoveryCodes(salt, 8)
+	if err != nil {
+		t.Fatalf("GenerateRecoveryCodes: %v", err)
+	}
+	if err := db.CreateUser(sqlDB, &db.User{
+		Username:      username,
+		Hash:          hash,
+		Salt:          salt,
+		TotpSecret:    "",
+		RecoveryCodes: hashes,
+		IsAdmin:       true,
+		CreatedAt:     time.Now().UnixMilli(),
+	}); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	return username, password, plain
+}
+
+func emptySecretCode(t *testing.T) string {
+	t.Helper()
+	code, err := totp.GenerateCode("", time.Now())
+	if err != nil {
+		t.Fatalf("GenerateCode: %v", err)
+	}
+	return code
+}
+
+func assertNoRefreshCookie(t *testing.T, w *httptest.ResponseRecorder) {
+	t.Helper()
+	for _, c := range w.Result().Cookies() {
+		if c.Name == "refreshToken" && c.Value != "" {
+			t.Error("rejected request must not set a refreshToken cookie")
+		}
+	}
+}
+
+func TestMFA_NoSecretRejectsCode(t *testing.T) {
+	app := newTestApp(t)
+	router := buildRouter(app)
+	username, _, _ := seedNoTOTPAccount(t, app.DB)
+	mfaToken, err := auth.SignMFAToken(app.privateKey(), app.Cfg.JWTIssuer, username)
+	if err != nil {
+		t.Fatalf("SignMFAToken: %v", err)
+	}
+
+	w := doRequest(t, router, http.MethodPost, "/api/auth/mfa",
+		jsonBody(t, map[string]string{"mfaToken": mfaToken, "code": emptySecretCode(t)}),
+		nil, nil)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("want 401, got %d: %s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "accessToken") {
+		t.Error("rejected request must not return an access token")
+	}
+	assertNoRefreshCookie(t, w)
+}
+
+func TestAuthorizePOST_NoSecretRejectsCode(t *testing.T) {
+	app := newTestApp(t)
+	router := buildRouter(app)
+	clientID, _ := seedOAuthClient(t, app)
+	username, password, _ := seedNoTOTPAccount(t, app.DB)
+	_, challenge := buildPKCE()
+
+	w := doFormRequest(t, router, http.MethodPost, "/authorize", url.Values{
+		"client_id":             {clientID},
+		"redirect_uri":          {"http://localhost:3000/cb"},
+		"code_challenge":        {challenge},
+		"code_challenge_method": {"S256"},
+		"decision":              {"allow"},
+		"username":              {username},
+		"password":              {password},
+		"totp":                  {emptySecretCode(t)},
+	}, nil, nil)
+	if w.Code != http.StatusOK {
+		t.Errorf("want 200 (re-render), got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "2FA") {
+		t.Error("expected 2FA error message in re-rendered form")
+	}
+	if loc := w.Header().Get("Location"); loc != "" {
+		t.Errorf("want no Location header, got %q", loc)
+	}
+	var codes int
+	if err := app.DB.QueryRow("SELECT COUNT(*) FROM oauth_auth_codes").Scan(&codes); err != nil {
+		t.Fatalf("count auth codes: %v", err)
+	}
+	if codes != 0 {
+		t.Errorf("want no saved auth code, got %d", codes)
+	}
+}
+
+func TestResetPassword_NoSecretRejectsCode(t *testing.T) {
+	app := newTestApp(t)
+	router := buildRouter(app)
+	username, password, _ := seedNoTOTPAccount(t, app.DB)
+
+	token := "nototpresettoken"
+	if err := db.SavePasswordResetToken(app.DB, token, username, time.Now().Add(time.Hour).UnixMilli()); err != nil {
+		t.Fatalf("SavePasswordResetToken: %v", err)
+	}
+
+	w := doRequest(t, router, http.MethodPost, "/api/auth/reset-password",
+		jsonBody(t, map[string]string{
+			"token":       token,
+			"newPassword": "brandnewpass123",
+			"totpCode":    emptySecretCode(t),
+		}), nil, nil)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("want 401, got %d: %s", w.Code, w.Body.String())
+	}
+	assertNoRefreshCookie(t, w)
+
+	u, err := db.GetUser(app.DB, username)
+	if err != nil || u == nil {
+		t.Fatalf("GetUser: %v %v", u, err)
+	}
+	if u.Hash != auth.HashPassword(password, "deadbeefdeadbeefdeadbeefdeadbeef") {
+		t.Error("password hash should be unchanged")
+	}
+}
+
+func TestRecovery_NoSecretAccountStillSignsIn(t *testing.T) {
+	app := newTestApp(t)
+	router := buildRouter(app)
+	username, _, recoveryCodes := seedNoTOTPAccount(t, app.DB)
+	mfaToken, err := auth.SignMFAToken(app.privateKey(), app.Cfg.JWTIssuer, username)
+	if err != nil {
+		t.Fatalf("SignMFAToken: %v", err)
+	}
+
+	w := doRequest(t, router, http.MethodPost, "/api/auth/recovery",
+		jsonBody(t, map[string]string{"mfaToken": mfaToken, "code": recoveryCodes[0]}),
+		nil, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		AccessToken string `json:"accessToken"`
+	}
+	decodeJSON(t, w.Body, &resp)
+	if resp.AccessToken == "" {
+		t.Error("expected accessToken in response")
 	}
 }
