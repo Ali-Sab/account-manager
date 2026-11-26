@@ -187,30 +187,37 @@ func doRequest(t *testing.T, router http.Handler, method, path string, body io.R
 func seedAccount(t *testing.T, sqlDB *sql.DB) (username, password, totpSecret string) {
 	t.Helper()
 	username = "alice"
-	password = "password123"
-	salt := "deadbeefdeadbeefdeadbeefdeadbeef"
-	hash := auth.HashPassword(password, salt)
 	secret, err := auth.GenerateSecret()
 	if err != nil {
 		t.Fatalf("GenerateSecret: %v", err)
 	}
+	password, _ = seedUser(t, sqlDB, username, secret)
+	return username, password, secret
+}
+
+// seedUser creates an admin account with the given TOTP secret and returns its
+// password and plaintext recovery codes.
+func seedUser(t *testing.T, sqlDB *sql.DB, username, totpSecret string) (password string, recoveryCodes []string) {
+	t.Helper()
+	password = "password123"
+	salt := "deadbeefdeadbeefdeadbeefdeadbeef"
+	hash := auth.HashPassword(password, salt)
 	plain, hashes, err := auth.GenerateRecoveryCodes(salt, 8)
 	if err != nil {
 		t.Fatalf("GenerateRecoveryCodes: %v", err)
 	}
-	_ = plain
 	if err := db.CreateUser(sqlDB, &db.User{
 		Username:      username,
 		Hash:          hash,
 		Salt:          salt,
-		TotpSecret:    secret,
+		TotpSecret:    totpSecret,
 		RecoveryCodes: hashes,
 		IsAdmin:       true,
 		CreatedAt:     time.Now().UnixMilli(),
 	}); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	return username, password, secret
+	return password, plain
 }
 
 // seedAccessToken returns a valid access token for the given username.
