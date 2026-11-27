@@ -123,7 +123,7 @@ func (a *App) Setup(w http.ResponseWriter, r *http.Request) {
 
 	emailPending := false
 	if email := strings.TrimSpace(body.Email); email != "" {
-		if err := a.sendEmailVerification(r, username, email); err == nil {
+		if err := a.sendEmailVerification(username, email); err == nil {
 			emailPending = true
 		}
 	}
@@ -230,7 +230,7 @@ func (a *App) AcceptInvite(w http.ResponseWriter, r *http.Request) {
 
 	emailPending := false
 	if email := strings.TrimSpace(body.Email); email != "" {
-		if err := a.sendEmailVerification(r, username, email); err == nil {
+		if err := a.sendEmailVerification(username, email); err == nil {
 			emailPending = true
 		}
 	}
