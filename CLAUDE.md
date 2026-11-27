@@ -141,7 +141,7 @@ See `.env.example`. Key vars:
 PORT=3001
 DATA_DIR=./data
 CSRF_SECRET=
-JWT_ISSUER=http://localhost:3001       # must match the issuer claim in tokens
+JWT_ISSUER=http://localhost:3001       # token issuer; emailed and invite links use its scheme and host
 WEBAUTHN_RP_ID=localhost
 GAMEBACKLOG_REDIRECT_URI=http://localhost:3000/auth/callback
 CLAUDE_PORTAL_REDIRECT_URI=http://localhost:7681/oauth/callback

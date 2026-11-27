@@ -496,21 +496,15 @@ func (a *App) ForgotPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	token := hex.EncodeToString(tokBytes)
+	resetURL, err := publicLink(a.Cfg.JWTIssuer, "reset", token)
+	if err != nil {
+		log.Printf("reset link: %v", err)
+		return
+	}
 	expiresAt := time.Now().Add(time.Hour).UnixMilli()
 	if err := db.SavePasswordResetToken(a.DB, token, user.Username, expiresAt); err != nil {
 		return
 	}
-
-	// Build reset URL from request headers (same pattern as AdminCreateInvite).
-	proto := r.Header.Get("X-Forwarded-Proto")
-	if proto == "" {
-		proto = "http"
-	}
-	host := r.Header.Get("X-Forwarded-Host")
-	if host == "" {
-		host = r.Host
-	}
-	resetURL := proto + "://" + host + "/accounts/?reset=" + token
 
 	body2 := "Someone requested a password reset for your account.\n\n" +
 		"Click the link below to set a new password (expires in 1 hour):\n\n" +
@@ -621,7 +615,7 @@ func (a *App) UpdateEmail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := a.sendEmailVerification(r, username, email); err != nil {
+	if err := a.sendEmailVerification(username, email); err != nil {
 		jsonErr(w, http.StatusInternalServerError, "Failed to send verification email — check SMTP settings")
 		return
 	}
@@ -664,26 +658,20 @@ func (a *App) VerifyEmail(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, map[string]any{"ok": true, "email": email})
 }
 
-func (a *App) sendEmailVerification(r *http.Request, username, email string) error {
+func (a *App) sendEmailVerification(username, email string) error {
 	tokBytes := make([]byte, 32)
 	if _, err := rand.Read(tokBytes); err != nil {
 		return err
 	}
 	token := hex.EncodeToString(tokBytes)
+	verifyURL, err := publicLink(a.Cfg.JWTIssuer, "verify-email", token)
+	if err != nil {
+		return err
+	}
 	expiresAt := time.Now().Add(24 * time.Hour).UnixMilli()
 	if err := db.SaveEmailVerificationToken(a.DB, token, username, email, expiresAt); err != nil {
 		return err
 	}
-
-	proto := r.Header.Get("X-Forwarded-Proto")
-	if proto == "" {
-		proto = "http"
-	}
-	host := r.Header.Get("X-Forwarded-Host")
-	if host == "" {
-		host = r.Host
-	}
-	verifyURL := proto + "://" + host + "/accounts/?verify-email=" + token
 
 	body := "Please verify your email address by clicking the link below (expires in 24 hours):\n\n" +
 		verifyURL + "\n\n" +

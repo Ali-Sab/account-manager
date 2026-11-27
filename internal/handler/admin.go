@@ -1,7 +1,7 @@
 package handler
 
 import (
-	"fmt"
+	"log"
 	"net/http"
 
 	"account-manager/internal/db"
@@ -78,22 +78,15 @@ func (a *App) AdminDeleteUser(w http.ResponseWriter, r *http.Request) {
 func (a *App) AdminCreateInvite(w http.ResponseWriter, r *http.Request) {
 	actor := usernameFromContext(r)
 	token := randomHex(32)
+	inviteURL, err := publicLink(a.Cfg.JWTIssuer, "invite", token)
+	if err != nil {
+		log.Printf("invite link: %v", err)
+		jsonErr(w, http.StatusInternalServerError, "Failed to create invite")
+		return
+	}
 	if err := db.CreatePendingInvite(a.DB, token, actor); err != nil {
 		jsonErr(w, http.StatusInternalServerError, "Failed to create invite")
 		return
 	}
-	proto := r.Header.Get("X-Forwarded-Proto")
-	if proto == "" {
-		if r.TLS != nil {
-			proto = "https"
-		} else {
-			proto = "http"
-		}
-	}
-	host := r.Header.Get("X-Forwarded-Host")
-	if host == "" {
-		host = r.Host
-	}
-	inviteURL := fmt.Sprintf("%s://%s/accounts/?invite=%s", proto, host, token)
 	jsonOK(w, map[string]string{"token": token, "url": inviteURL})
 }

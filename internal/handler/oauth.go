@@ -32,22 +32,6 @@ func timingSafeEqual(a, b string) bool {
 	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
 
-func getIssuer(r *http.Request) string {
-	proto := r.Header.Get("X-Forwarded-Proto")
-	if proto == "" {
-		if r.TLS != nil {
-			proto = "https"
-		} else {
-			proto = "http"
-		}
-	}
-	host := r.Header.Get("X-Forwarded-Host")
-	if host == "" {
-		host = r.Host
-	}
-	return fmt.Sprintf("%s://%s", proto, host)
-}
-
 // DiscoveryCORS adds permissive CORS headers for read-only discovery endpoints
 // (/.well-known/*, /jwks.json). It must NOT be applied to /authorize or /token.
 func DiscoveryCORS(h http.Handler) http.Handler {
