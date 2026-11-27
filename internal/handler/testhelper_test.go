@@ -98,6 +98,7 @@ func buildRouter(app *App) http.Handler {
 	r.Post("/authorize", app.AuthorizePOST)
 	r.Get("/token", app.TokenGET)
 	r.Post("/token", app.TokenPOST)
+	r.Post("/api/mcp-client", app.MCPClientInfo)
 
 	return r
 }

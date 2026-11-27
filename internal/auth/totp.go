@@ -21,8 +21,12 @@ func GenerateSecret() (string, error) {
 	return key.Secret(), nil
 }
 
-// VerifyTOTP checks a 6-digit TOTP code with ±1 period tolerance.
+// VerifyTOTP checks a 6-digit TOTP code with ±1 period tolerance. It returns
+// false when no secret is saved.
 func VerifyTOTP(secret, code string) bool {
+	if secret == "" {
+		return false
+	}
 	code = strings.ReplaceAll(code, " ", "")
 	if len(code) != 6 {
 		return false

@@ -53,6 +53,24 @@ func TestVerifyTOTP_WithSpaces(t *testing.T) {
 	}
 }
 
+func TestVerifyTOTP_EmptySecretRejected(t *testing.T) {
+	code, err := totp.GenerateCode("", time.Now())
+	if err == nil {
+		if VerifyTOTP("", code) {
+			t.Error("a code should not pass when no secret is saved")
+		}
+		spaced := code[:3] + " " + code[3:]
+		if VerifyTOTP("", spaced) {
+			t.Error("a spaced code should not pass when no secret is saved")
+		}
+	} else {
+		t.Logf("library generates no code for an empty secret: %v", err)
+	}
+	if VerifyTOTP("", "000000") {
+		t.Error("000000 should not pass when no secret is saved")
+	}
+}
+
 func TestGenerateSecret_Length(t *testing.T) {
 	secret, err := GenerateSecret()
 	if err != nil {
