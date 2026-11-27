@@ -6,6 +6,7 @@ Standalone auth service and account portal. Go backend (chi + modernc SQLite) + 
 
 ```
 cmd/server/main.go        — entry point: idempotent setup, start HTTP server
+cmd/server/router.go      — all routes and limiters
 internal/
   config/config.go        — env vars + defaults
   db/
@@ -20,7 +21,8 @@ internal/
   middleware/
     auth.go               — RequireAuth: Bearer JWT check, audience=account-manager
     csrf.go               — double-submit CSRF cookie
-    ratelimit.go          — in-memory sliding-window rate limiter
+    ratelimit.go          — in-memory fixed-window rate limiter with pruning
+    clientip.go           — client address for rate-limit keys (X-Real-IP from the proxy)
   handler/
     auth.go               — /api/auth/* routes
     setup.go              — /api/setup/* routes + QR code
@@ -92,6 +94,20 @@ The `/authorize` endpoint skips the consent page for already-authenticated users
 2. `POST /api/auth/mfa` — TOTP check → sets `refreshToken` httpOnly cookie (30d), returns `accessToken` (1h)
 3. On subsequent loads: `POST /api/auth/refresh` (CSRF-protected) → returns fresh `accessToken`
 4. An account with no TOTP secret cannot pass a TOTP check. It signs in with a passkey, or with password plus a recovery code. Password reset by email needs a TOTP code.
+
+## Rate limits
+
+Each bucket counts per client address, except the per-account bucket. nginx sets `X-Real-IP`, and account-manager reads it only when the direct peer is a loopback or private address. IPv6 addresses count per /64, except Tailscale addresses (`fd7a:115c:a1e0::/48`), which count per address.
+
+- Sign-in routes (`/authorize` POST, `/api/auth/login`, `/mfa`, `/recovery`, passkey routes, email verify, forgot and reset password): every request counts.
+- `/api/auth/refresh`: every request counts, in its own bucket.
+- Setup and invite routes: every request counts, in their own bucket.
+- Failed client authentications on `/token` and `/api/mcp-client`.
+- Wrong TOTP, recovery or reset codes, per account, at half of `RATE_LIMIT_MAX` (at least 1). A wrong password does not count here.
+
+A slot is taken before each code or client-secret check and given back when the check passes, so only failed attempts count.
+
+Expired entries are pruned. At 10000 keys per limiter, new public addresses share one bucket. Loopback, private and Tailscale (`100.64.0.0/10`) addresses, and account keys, always get their own entry.
 
 ## Validation rules
 

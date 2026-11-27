@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -187,30 +188,51 @@ func doRequest(t *testing.T, router http.Handler, method, path string, body io.R
 func seedAccount(t *testing.T, sqlDB *sql.DB) (username, password, totpSecret string) {
 	t.Helper()
 	username = "alice"
-	password = "password123"
-	salt := "deadbeefdeadbeefdeadbeefdeadbeef"
-	hash := auth.HashPassword(password, salt)
 	secret, err := auth.GenerateSecret()
 	if err != nil {
 		t.Fatalf("GenerateSecret: %v", err)
 	}
-	plain, hashes, err := auth.GenerateRecoveryCodes(salt, 8)
-	if err != nil {
-		t.Fatalf("GenerateRecoveryCodes: %v", err)
+	password, _ = seedUser(t, sqlDB, username, secret)
+	return username, password, secret
+}
+
+// Computed once: PBKDF2 is slow, and every seeded account uses the same password and salt.
+var (
+	seedOnce   sync.Once
+	seedHash   string
+	seedPlain  []string
+	seedHashes []string
+	seedErr    error // package-level, so every caller sees a failure of the one run
+)
+
+// seedUser creates an admin account with the given TOTP secret and returns its
+// password and plaintext recovery codes.
+func seedUser(t *testing.T, sqlDB *sql.DB, username, totpSecret string) (password string, recoveryCodes []string) {
+	t.Helper()
+	password = "password123"
+	salt := "deadbeefdeadbeefdeadbeefdeadbeef"
+	seedOnce.Do(func() {
+		seedHash = auth.HashPassword(password, salt)
+		seedPlain, seedHashes, seedErr = auth.GenerateRecoveryCodes(salt, 8)
+	})
+	if seedErr != nil || seedHash == "" {
+		t.Fatalf("seed hashing failed: %v", seedErr)
 	}
-	_ = plain
+	hash := seedHash
+	hashes := append([]string(nil), seedHashes...)
+	plain := append([]string(nil), seedPlain...)
 	if err := db.CreateUser(sqlDB, &db.User{
 		Username:      username,
 		Hash:          hash,
 		Salt:          salt,
-		TotpSecret:    secret,
+		TotpSecret:    totpSecret,
 		RecoveryCodes: hashes,
 		IsAdmin:       true,
 		CreatedAt:     time.Now().UnixMilli(),
 	}); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	return username, password, secret
+	return password, plain
 }
 
 // seedAccessToken returns a valid access token for the given username.

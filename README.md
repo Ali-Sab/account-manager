@@ -11,6 +11,7 @@ All other services are OAuth relying parties — they redirect here for login an
 ```
 account-manager/
   cmd/server/main.go        — process entry point
+  cmd/server/router.go      — all routes and rate limiters
   internal/
     auth/                   — JWT signing/verification, TOTP, password hashing
     config/                 — env var loading
@@ -47,7 +48,7 @@ account-manager/
 | `SMTP_PASS` | No | SMTP password |
 | `SMTP_FROM` | No | From address for outbound email (defaults to `SMTP_USER` if blank) |
 | `SMTP_TLS` | No | TLS mode: `starttls` (default, port 587), `tls` (implicit/port 465), `none` (dev only) |
-| `RATE_LIMIT_MAX` | No | Max auth requests per IP per 15-minute window (default: `20`). Raise in dev/CI to avoid spurious 429s. |
+| `RATE_LIMIT_MAX` | No | Per client address, per 15-minute window: max requests to sign-in routes, to `/api/auth/refresh`, and to setup and invite routes (separate budgets), and max failed client authentications on `/token` and `/api/mcp-client` (default: `20`). Wrong TOTP, recovery and password-reset codes are also limited per account, to half this value (at least 1). Raise in dev/CI to avoid spurious 429s. |
 
 ---
 

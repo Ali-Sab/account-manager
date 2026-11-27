@@ -67,10 +67,20 @@ func (a *App) MFA(w http.ResponseWriter, r *http.Request) {
 	}
 
 	user, _ := db.GetUser(a.DB, claims.Subject)
-	if user == nil || !auth.VerifyTOTP(user.TotpSecret, body.Code) {
+	if user == nil {
 		jsonErr(w, http.StatusUnauthorized, "Invalid MFA code")
 		return
 	}
+	release, ok := a.reserveSecondFactor(user.Username)
+	if !ok {
+		tooManyAttempts(w)
+		return
+	}
+	if !auth.VerifyTOTP(user.TotpSecret, body.Code) {
+		jsonErr(w, http.StatusUnauthorized, "Invalid MFA code")
+		return
+	}
+	release()
 
 	accessToken, csrfToken, err := a.issueSession(w, r, user.Username)
 	if err != nil {
@@ -103,11 +113,17 @@ func (a *App) Recovery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	release, ok := a.reserveSecondFactor(user.Username)
+	if !ok {
+		tooManyAttempts(w)
+		return
+	}
 	idx, ok := consumeRecoveryCode(user, body.Code)
 	if !ok {
 		jsonErr(w, http.StatusUnauthorized, "Invalid recovery code")
 		return
 	}
+	release()
 
 	remaining := user.RecoveryCodes
 	remaining = append(remaining[:idx], remaining[idx+1:]...)
@@ -532,10 +548,16 @@ func (a *App) ResetPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	release, ok := a.reserveSecondFactor(user.Username)
+	if !ok {
+		tooManyAttempts(w)
+		return
+	}
 	if !auth.VerifyTOTP(user.TotpSecret, body.TotpCode) {
 		jsonErr(w, http.StatusUnauthorized, "Invalid authenticator code")
 		return
 	}
+	release()
 
 	saltBytes := make([]byte, 32)
 	if _, err := rand.Read(saltBytes); err != nil {

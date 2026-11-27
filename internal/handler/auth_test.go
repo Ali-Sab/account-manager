@@ -716,25 +716,8 @@ func TestResetPassword_RevokesExistingSessions(t *testing.T) {
 func seedNoTOTPAccount(t *testing.T, sqlDB *sql.DB) (username, password string, recoveryCodes []string) {
 	t.Helper()
 	username = "nototp"
-	password = "password123"
-	salt := "deadbeefdeadbeefdeadbeefdeadbeef"
-	hash := auth.HashPassword(password, salt)
-	plain, hashes, err := auth.GenerateRecoveryCodes(salt, 8)
-	if err != nil {
-		t.Fatalf("GenerateRecoveryCodes: %v", err)
-	}
-	if err := db.CreateUser(sqlDB, &db.User{
-		Username:      username,
-		Hash:          hash,
-		Salt:          salt,
-		TotpSecret:    "",
-		RecoveryCodes: hashes,
-		IsAdmin:       true,
-		CreatedAt:     time.Now().UnixMilli(),
-	}); err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	return username, password, plain
+	password, recoveryCodes = seedUser(t, sqlDB, username, "")
+	return username, password, recoveryCodes
 }
 
 func emptySecretCode(t *testing.T) string {
@@ -796,7 +779,7 @@ func TestAuthorizePOST_NoSecretRejectsCode(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Errorf("want 200 (re-render), got %d", w.Code)
 	}
-	if !strings.Contains(w.Body.String(), "2FA") {
+	if !strings.Contains(w.Body.String(), "Incorrect 2FA code.") {
 		t.Error("expected 2FA error message in re-rendered form")
 	}
 	if loc := w.Header().Get("Location"); loc != "" {

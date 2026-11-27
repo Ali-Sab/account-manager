@@ -48,6 +48,8 @@ type App struct {
 	DB      *sql.DB
 	Keys    *keys.KeyPair
 	Cfg     *config.Config
+	// Limits is optional; nil turns the in-handler limits off.
+	Limits  *Limits
 }
 
 // helpers
